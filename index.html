@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>장비관리 통합 시스템 (최종)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 10px; background: #f0f2f5; }
+        .status-bar { background: #000; color: #0f0; padding: 12px; font-size: 14px; text-align: center; border-bottom: 2px solid #0f0; position: sticky; top: 0; z-index: 100; }
+        .tab-menu { display: flex; gap: 5px; margin: 10px 0; }
+        .tab-btn { flex: 1; padding: 12px; border: none; background: #dfe6e9; font-weight: bold; border-radius: 5px; cursor: pointer; }
+        .tab-btn.active { background: #d63031; color: white; }
+        .content { display: none; background: white; padding: 15px; border-radius: 10px; min-height: 400px; }
+        .content.active { display: block; }
+        select, input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; box-sizing: border-box; }
+        .card { border-left: 8px solid #0984e3; background: #fff; padding: 15px; margin-bottom: 10px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .card-title { font-weight: bold; margin-bottom: 5px; color: #2d3436; }
+        .memo-box { background: #fff5f5; border: 1px solid #ff7675; padding: 8px; border-radius: 4px; color: #d63031; font-size: 14px; }
+        .date-header { font-size: 1.2em; font-weight: bold; color: #e84118; margin: 15px 0; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="status-bar" id="statusBar">⏳ 데이터 전수 동기화 중...</div>
+
+<div class="tab-menu">
+    <button class="tab-btn active" onclick="openTab('place-tab')">📍 장소/장비</button>
+    <button class="tab-btn" onclick="openTab('search-tab')">🔍 자산검색</button>
+    <button class="tab-btn" onclick="initCalendar(); openTab('date-tab')">📅 날짜별</button>
+</div>
+
+<div id="place-tab" class="content active">
+    <select id="locSelect" onchange="filterComplex()">
+        <option value="">1. 장소 선택 (전체)</option>
+        <option value="수원">수원</option><option value="아산1">아산1</option>
+        <option value="평택">평택</option><option value="사무실">사무실</option>
+    </select>
+    <select id="devSelect" onchange="filterComplex()">
+        <option value="">2. 장비 선택 (전체)</option>
+        <option value="청력">청력기</option><option value="중이">중이기기</option>
+        <option value="소음">소음계</option><option value="원심">원심분리기</option>
+        <option value="HRV">HRV</option><option value="EKG">EKG</option>
+        <option value="폐활량">폐활량</option><option value="프린터">프린터기</option>
+        <option value="노트북">노트북</option>
+    </select>
+    <div id="placeResult"></div>
+</div>
+
+<div id="search-tab" class="content">
+    <input type="text" id="assetInput" placeholder="자산번호 입력..." onkeyup="searchByAsset()">
+    <div id="searchResult"></div>
+</div>
+
+<div id="date-tab" class="content">
+    <div id="calendar"></div>
+    <div id="dateResult"></div>
+</div>
+
+<script>
+    const sheetId = "12xhA0X6iOrg-4mq9KWZsQ9nPb2818P5VGUDXQMhjeTw";
+    const sheetGids = [
+        {n:"청력",g:"1397804768"},{n:"청력부스",g:"1226463543"},{n:"중이",g:"1413774664"},
+        {n:"소음",g:"199554987"},{n:"원심",g:"1627219985"},{n:"HRV",g:"816640230"},
+        {n:"EKG",g:"914024434"},{n:"폐활량",g:"348975961"},{n:"실린지",g:"874684579"},
+        {n:"프린터",g:"70160554"},{n:"노트북",g:"811915899"},{n:"와이브로",g:"1793948339"},
+        {n:"수원",g:"1112786"},{n:"아산1",g:"1052607410"},{n:"평택",g:"503432091"},{n:"사무실",g:"734953362"}
+    ];
+
+    let allData = [];
+
+    async function syncAll() {
+        const promises = sheetGids.map(s => {
+            return new Promise(resolve => {
+                const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${s.g}&cache=${Math.random()}`;
+                Papa.parse(url, {
+                    download: true, header: true, skipEmptyLines: true,
+                    complete: res => {
+                        const fixed = res.data.map(row => ({...row, _sheetName: s.n}));
+                        resolve(fixed);
+                    },
+                    error: () => resolve([])
+                });
+            });
+        });
+        const results = await Promise.all(promises);
+        allData = results.flat().filter(row => Object.values(row).some(v => v && v.length > 1));
+        document.getElementById('statusBar').innerText = `✅ 총 ${allData.length}건 데이터 로드 성공!`;
+        filterComplex();
+    }
+
+    function getVal(row, keyword) {
+        const key = Object.keys(row).find(k => k.replace(/\s/g,'').includes(keyword));
+        return key ? row[key] : "";
+    }
+
+    function renderCard(row, specificDate = null) {
+        const asset = getVal(row, "자산번호") || "번호없음";
+        const loc = getVal(row, "현재위치") || row._sheetName;
+        const keys = Object.keys(row);
+        let memo = "특이사항 없음";
+        let dateLabel = "";
+
+        if (specificDate) {
+            memo = row[specificDate];
+            dateLabel = specificDate;
+        } else {
+            const dateKey = keys.filter(k => /\d{1,2}\/\d{1,2}/.test(k)).reverse().find(k => row[k] && row[k].trim());
+            if (dateKey) { memo = row[dateKey]; dateLabel = dateKey; }
+        }
+
+        return `<div class="card">
+            <div class="card-title">${loc} / ${asset}</div>
+            <div class="memo-box">[${dateLabel || '최근'}] ${memo}</div>
+        </div>`;
+    }
+
+    function filterComplex() {
+        const loc = document.getElementById('locSelect').value;
+        const dev = document.getElementById('devSelect').value;
+        const filtered = allData.filter(row => {
+            const rowLoc = (getVal(row, "현재위치") || row._sheetName);
+            const rowStr = JSON.stringify(row);
+            return (!loc || rowLoc.includes(loc)) && (!dev || rowStr.includes(dev));
+        });
+        document.getElementById('placeResult').innerHTML = filtered.map(row => renderCard(row)).join('');
+    }
+
+    function searchByAsset() {
+        const val = document.getElementById('assetInput').value.toLowerCase();
+        const filtered = allData.filter(row => getVal(row, "자산번호").toLowerCase().includes(val));
+        document.getElementById('searchResult').innerHTML = filtered.map(row => renderCard(row)).join('');
+    }
+
+    function openTab(id) {
+        document.querySelectorAll('.content, .tab-btn').forEach(e => e.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+        event.currentTarget.classList.add('active');
+    }
+
+    let calendar;
+    function initCalendar() {
+        if(calendar) return;
+        calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+            initialView: 'dayGridMonth', locale: 'ko',
+            dateClick: info => {
+                const d = new Date(info.dateStr);
+                const k = `${d.getMonth()+1}/${d.getDate()}`;
+                const k2 = `${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getDate().toString().padStart(2,'0')}`;
+                const res = allData.filter(row => (row[k] && row[k].trim()) || (row[k2] && row[k2].trim()));
+                document.getElementById('dateResult').innerHTML = `<div class="date-header">📅 ${info.dateStr}</div>` + 
+                    res.map(row => renderCard(row, row[k] ? k : k2)).join('');
+            }
+        });
+        calendar.render();
+    }
+    syncAll();
+</script>
+</body>
+</html>
