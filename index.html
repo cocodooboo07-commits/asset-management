@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>장비 통합 관리 시스템</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js"></script>
+    <style>
+        body { font-family: 'Apple SD Gothic Neo', sans-serif; margin: 0; padding: 20px; background: #f0f2f5; }
+        .tab-menu { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab-btn { padding: 10px 20px; cursor: pointer; border: none; border-radius: 5px; background: #ddd; font-weight: bold; }
+        .tab-btn.active { background: #007bff; color: white; }
+        .content { display: none; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .content.active { display: block; }
+        input, select { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+        .card { border: 1px solid #eee; padding: 15px; margin-bottom: 10px; border-radius: 8px; }
+        .card-title { font-weight: bold; color: #007bff; font-size: 1.1em; }
+        #calendar { max-width: 900px; margin: 0 auto; }
+    </style>
+</head>
+<body>
+
+    <div class="tab-menu">
+        <button class="tab-btn active" onclick="openTab('search-tab')">1. 자산검색</button>
+        <button class="tab-btn" onclick="openTab('place-tab')">2. 장소별</button>
+        <button class="tab-btn" onclick="openTab('date-tab')">3. 날짜별(달력)</button>
+    </div>
+
+    <div id="search-tab" class="content active">
+        <input type="text" id="assetSearch" placeholder="자산번호를 입력하세요..." onkeyup="searchAsset()">
+        <div id="searchResult"></div>
+    </div>
+
+    <div id="place-tab" class="content">
+        <select id="placeSelect" onchange="filterByPlace()">
+            <option value="">장소 선택 (수원, 아산1, 평택, 사무실...)</option>
+        </select>
+        <div id="placeResult"></div>
+    </div>
+
+    <div id="date-tab" class="content">
+        <div id="calendar"></div>
+        <div id="dateResult" style="margin-top:20px;"></div>
+    </div>
+
+    <script>
+        // 📢 형님! 시트 '웹에 게시(CSV)' 주소를 여기에 딲 넣으십쇼!
+        const csvUrl = "여기에_구글시트_CSV_주소를_복사하세요";
+        let rawData = [];
+
+        async function init() {
+            Papa.parse(csvUrl, {
+                download: true, header: true,
+                complete: function(results) {
+                    rawData = results.data;
+                    setupPlaceSelect();
+                    setupCalendar();
+                }
+            });
+        }
+
+        // 탭 전환
+        function openTab(tabId) {
+            document.querySelectorAll('.content, .tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            event.currentTarget.classList.add('active');
+            if(tabId === 'date-tab') window.dispatchEvent(new Event('resize')); 
+        }
+
+        // 1. 자산번호 검색
+        function searchAsset() {
+            const val = document.getElementById('assetSearch').value.toLowerCase();
+            const res = rawData.filter(row => row['자산번호'] && row['자산번호'].toLowerCase().includes(val));
+            renderCards(res, 'searchResult');
+        }
+
+        // 2. 장소별 필터링
+        function setupPlaceSelect() {
+            const places = [...new Set(rawData.map(row => row['현재위치']).filter(p => p))];
+            const select = document.getElementById('placeSelect');
+            places.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p; opt.innerText = p;
+                select.appendChild(opt);
+            });
+        }
+        function filterByPlace() {
+            const val = document.getElementById('placeSelect').value;
+            const res = rawData.filter(row => row['현재위치'] === val);
+            renderCards(res, 'placeResult');
+        }
+
+        // 3. 날짜별 달력 세팅
+        function setupCalendar() {
+            const calendarEl = document.getElementById('calendar');
+            const calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                locale: 'ko',
+                dateClick: function(info) {
+                    showDateData(info.dateStr);
+                },
+                events: function(fetchInfo, successCallback) {
+                    // 시트에서 특이사항(수령, 반납 등)이 있는 날짜들만 점 찍기
+                    let events = [];
+                    rawData.forEach(row => {
+                        for(let i=1; i<=31; i++) {
+                            let status = row[`01 / ${i}`];
+                            if(status && status.trim() !== "") {
+                                events.push({ title: '!', start: `2025-01-${String(i).padStart(2, '0')}`, display: 'list-item' });
+                            }
+                        }
+                    });
+                    successCallback(events);
+                }
+            });
+            calendar.render();
+        }
+
+        function showDateData(dateStr) {
+            const day = parseInt(dateStr.split('-')[2]);
+            const res = rawData.filter(row => row[`01 / ${day}`] && row[`01 / ${day}`].trim() !== "");
+            const container = document.getElementById('dateResult');
+            container.innerHTML = `<h3>${dateStr} 기록 장비</h3>`;
+            renderCards(res, 'dateResult', `01 / ${day}`);
+        }
+
+        function renderCards(data, targetId, dateCol = null) {
+            const target = document.getElementById(targetId);
+            target.innerHTML = data.map(row => `
+                <div class="card">
+                    <div class="card-title">${row['자산번호']} (${row['기기명'] || '기기명 없음'})</div>
+                    <div>📍 현재위치: ${row['현재위치'] || '-'}</div>
+                    <div>📝 상태/특이사항: ${dateCol ? row[dateCol] : '시트 확인 필요'}</div>
+                </div>
+            `).join('') || '데이터가 없습니다.';
+        }
+
+        init();
+    </script>
+</body>
+</html>
