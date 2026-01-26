@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>자산 통합 관리</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 10px; background: #f0f2f5; }
+        .status-bar { background: #333; color: #0f0; padding: 10px; font-size: 12px; margin-bottom: 10px; border-radius: 5px; font-family: monospace; }
+        .tab-menu { display: flex; gap: 5px; margin-bottom: 10px; }
+        .tab-btn { flex: 1; padding: 15px 5px; cursor: pointer; border: none; background: #ccc; font-weight: bold; border-radius: 8px; }
+        .tab-btn.active { background: #007bff; color: white; }
+        .content { display: none; background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); min-height: 500px; }
+        .content.active { display: block; }
+        select, input { width: 100%; padding: 15px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
+        .card { border-left: 6px solid #007bff; background: #fff; padding: 15px; margin-bottom: 12px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .card-title { font-weight: bold; font-size: 1.1em; color: #333; }
+        .memo { margin-top: 10px; padding: 10px; background: #fff1f0; border: 1px solid #ffa39e; border-radius: 5px; color: #cf1322; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="status-bar" id="statusBar">시스템 가동 중... 시트 연결 확인 중...</div>
+
+    <div class="tab-menu">
+        <button class="tab-btn active" onclick="openTab('search-tab')">🔍 자산번호 검색</button>
+        <button class="tab-btn" onclick="openTab('place-tab')">📍 장소/장비 선택</button>
+        <button class="tab-btn" onclick="initCalendar(); openTab('date-tab')">📅 날짜별 특이사항</button>
+    </div>
+
+    <div id="search-tab" class="content active">
+        <input type="text" id="assetInput" placeholder="자산번호 입력 후 잠시 기다리쇼..." onkeyup="searchByAsset()">
+        <div id="searchResult"></div>
+    </div>
+
+    <div id="place-tab" class="content">
+        <select id="locSelect" onchange="updateDeviceSelect()">
+            <option value="">1. 장소 선택 (수원, 아산1, 평택...)</option>
+            <option value="수원">수원</option>
+            <option value="아산1">아산1</option>
+            <option value="평택">평택</option>
+            <option value="사무실">사무실</option>
+        </select>
+        <select id="devSelect" onchange="filterByLocAndDev()">
+            <option value="">2. 장비 선택 (청력기, 소음계...)</option>
+        </select>
+        <div id="placeResult"></div>
+    </div>
+
+    <div id="date-tab" class="content">
+        <div id="calendar"></div>
+        <div id="dateResult"></div>
+    </div>
+
+    <script>
+        const sheetId = "12xhA0X6iOrg-4mq9KWZsQ9nPb2818P5VGUDXQMhjeTw";
+        const devSheets = ["청력기","청력부스","중이기기","소음계","원심분리기","HRV","EKG","폐활량","실린지","프린터기","업무용노트북","와이브로"];
+        const locSheets = ["수원","아산1","평택","사무실"];
+        const allSheets = [...devSheets, ...locSheets];
+        
+        let allData = [];
+
+        async function init() {
+            const bar = document.getElementById('statusBar');
+            try {
+                const promises = allSheets.map(name => {
+                    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
+                    return new Promise(resolve => {
+                        Papa.parse(url, {
+                            download: true, header: true,
+                            complete: res => resolve(res.data.map(row => ({ ...row, _origin: name }))),
+                            error: () => resolve([])
+                        });
+                    });
+                });
+                const results = await Promise.all(promises);
+                allData = results.flat().filter(row => Object.values(row).some(v => v));
+                bar.innerText = `✅ 연결 완료: 데이터 ${allData.length}건 로드됨.`;
+                
+                const devSel = document.getElementById('devSelect');
+                devSheets.forEach(n => {
+                    const opt = document.createElement('option');
+                    opt.value = n; opt.text = n; devSel.add(opt);
+                });
+            } catch (e) {
+                bar.innerText = `❌ 연결 실패: 공유 설정이나 시트명을 확인하쇼!`;
+            }
+        }
+
+        function openTab(id) {
+            document.querySelectorAll('.content, .tab-btn').forEach(e => e.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            event.currentTarget.classList.add('active');
+            if(id === 'date-tab' && calendar) calendar.render();
+        }
+
+        // 장소 선택 시 장비 필터링 준비
+        function updateDeviceSelect() { filterByLocAndDev(); }
+
+        function filterByLocAndDev() {
+            const loc = document.getElementById('locSelect').value;
+            const dev = document.getElementById('devSelect').value;
+            let res = allData;
+            if(loc) res = res.filter(row => (row['현재위치'] || '').includes(loc) || row._origin === loc);
+            if(dev) res = res.filter(row => (row['기기명'] || '').includes(dev) || row._origin === dev);
+            render(res, 'placeResult');
+        }
+
+        function searchByAsset() {
+            const val = document.getElementById('assetInput').value.toLowerCase();
+            const res = allData.filter(row => {
+                const key = Object.keys(row).find(k => k.includes('자산번호'));
+                return row[key] && row[key].toString().toLowerCase().includes(val);
+            });
+            render(res, 'searchResult');
+        }
+
+        let calendar;
+        function initCalendar() {
+            if(calendar) return;
+            calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+                initialView: 'dayGridMonth', locale: 'ko',
+                events: (info, success) => {
+                    let evts = [];
+                    allData.forEach(row => {
+                        Object.keys(row).forEach(k => {
+                            if(/\d{2}\/\d{2}/.test(k) && row[k] && row[k].trim()) {
+                                const [m, d] = k.split('/');
+                                evts.push({ start: `2025-${m}-${d}`, display: 'background', color: '#ff4d4f' });
+                            }
+                        });
+                    });
+                    success(evts);
+                },
+                dateClick: info => showDate(info.dateStr)
+            });
+            calendar.render();
+        }
+
+        function showDate(dateStr) {
+            const [y, m, d] = dateStr.split('-');
+            const key1 = `${m}/${d}`; // 01/23 형식
+            const res = allData.filter(row => (row[key1] && row[key1].trim()));
+            document.getElementById('dateResult').innerHTML = `<h3>📅 ${dateStr} 특이사항</h3>`;
+            render(res, 'dateResult', key1);
+        }
+
+        function render(data, targetId, dateKey = null) {
+            const target = document.getElementById(targetId);
+            if(!data.length) { target.innerHTML = '<p>데이터가 없습니다.</p>'; return; }
+            target.innerHTML = data.map(row => {
+                const asset = row[Object.keys(row).find(k => k.includes('자산번호'))] || '번호없음';
+                const device = row[Object.keys(row).find(k => k.includes('기기명'))] || '기기명없음';
+                const memo = dateKey ? row[dateKey] : '';
+                return `
+                    <div class="card">
+                        <div class="card-title">${asset} <small>[${row._origin}]</small></div>
+                        <div>기기명: ${device} | 위치: ${row['현재위치'] || row._origin}</div>
+                        ${memo ? `<div class="memo">⚠️ 특이사항: ${memo}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+        init();
+    </script>
+</body>
+</html>
