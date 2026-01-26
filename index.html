@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>초고속 장비관리</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 10px; background: #f0f2f5; }
+        .status-bar { background: #1e272e; color: #00d8d6; padding: 15px; font-weight: bold; text-align: center; border-bottom: 3px solid #00d8d6; position: sticky; top: 0; z-index: 100; }
+        input { width: 100%; padding: 15px; margin: 10px 0; border: 2px solid #00d8d6; border-radius: 8px; font-size: 18px; box-sizing: border-box; }
+        .list-count { text-align: right; color: #666; font-size: 14px; margin-bottom: 5px; }
+        #list { display: flex; flex-direction: column; gap: 10px; }
+        .card { background: white; padding: 15px; border-radius: 10px; shadow: 0 2px 5px rgba(0,0,0,0.1); border-left: 10px solid #34e7e4; }
+        .card-top { display: flex; justify-content: space-between; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 5px; margin-bottom: 10px; }
+        .memo-item { background: #fff5f5; padding: 8px; border-radius: 5px; margin-top: 5px; border: 1px solid #ff7675; font-size: 14px; }
+        .highlight { color: #ff3f34; }
+    </style>
+</head>
+<body>
+
+<div class="status-bar" id="statusBar">🚀 전 데이터 동기화 대기 중...</div>
+<input type="text" id="searchInput" placeholder="자산번호, 장비명, 장소 통합 검색!" onkeyup="fastSearch()">
+<div class="list-count" id="listCount">검색 결과: 0건</div>
+<div id="list"></div>
+
+<script>
+    const sheetId = "12xhA0X6iOrg-4mq9KWZsQ9nPb2818P5VGUDXQMhjeTw";
+    const sheetGids = [
+        "1397804768","1226463543","1413774664","199554987","1627219985",
+        "816640230","914024434","348975961","874684579","70160554",
+        "811915899","1793948339","1112786","1052607410","503432091","734953362"
+    ];
+
+    let cacheData = [];
+
+    async function forceSync() {
+        const bar = document.getElementById('statusBar');
+        bar.innerText = "⏳ 16개 시트 탈탈 터는 중...";
+        
+        const promises = sheetGids.map(gid => {
+            return new Promise(resolve => {
+                const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}&cache=${Math.random()}`;
+                Papa.parse(url, {
+                    download: true, header: true, skipEmptyLines: true,
+                    complete: res => resolve(res.data),
+                    error: () => resolve([])
+                });
+            });
+        });
+
+        const allResults = await Promise.all(promises);
+        cacheData = allResults.flat().filter(row => {
+            // 자산번호 비슷하게 생긴 열이 하나라도 있고 내용이 있으면 합격
+            return Object.values(row).some(v => v && v.length > 2);
+        });
+
+        bar.innerText = `✅ 총 ${cacheData.length}개 데이터 로드 완료!`;
+        fastSearch(); 
+    }
+
+    function fastSearch() {
+        const query = document.getElementById('searchInput').value.toLowerCase();
+        const listDiv = document.getElementById('list');
+        const countDiv = document.getElementById('listCount');
+        
+        // 검색 속도 최적화: Filter + Map 조합
+        const filtered = cacheData.filter(row => {
+            const rowString = JSON.stringify(Object.values(row)).toLowerCase();
+            return rowString.includes(query);
+        });
+
+        countDiv.innerText = `검색 결과: ${filtered.length}건`;
+        
+        listDiv.innerHTML = filtered.slice(0, 500).map(row => { // 최대 500개까지만 먼저 렌더링 (속도 때문)
+            const keys = Object.keys(row);
+            const assetKey = keys.find(k => k.includes('자산번호')) || keys[0];
+            const locKey = keys.find(k => k.includes('현재위치')) || keys[1];
+            
+            // 날짜 기록만 추출
+            let memos = "";
+            keys.forEach(k => {
+                if(/\d{1,2}\/\d{1,2}/.test(k) && row[k] && row[k].trim()) {
+                    memos += `<div class="memo-item"><b>${k}:</b> ${row[k]}</div>`;
+                }
+            });
+
+            return `
+                <div class="card">
+                    <div class="card-top">
+                        <span>🆔 ${row[assetKey] || 'N/A'}</span>
+                        <span>📍 ${row[locKey] || '위치미정'}</span>
+                    </div>
+                    <div>${memos || '<span style="color:#ccc">특이사항 없음</span>'}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    forceSync();
+</script>
+</body>
+</html>
