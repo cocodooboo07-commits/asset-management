@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>장비 통합 관리 앱</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 15px; background: #f0f2f5; }
+        .tab-menu { display: flex; gap: 5px; margin-bottom: 15px; overflow-x: auto; padding-bottom: 10px; }
+        .tab-btn { flex: 0 0 auto; padding: 12px 20px; cursor: pointer; border: none; background: #ccc; font-weight: bold; border-radius: 8px; }
+        .tab-btn.active { background: #007bff; color: white; }
+        .content { display: none; background: white; padding: 15px; border-radius: 10px; min-height: 400px; }
+        .content.active { display: block; }
+        input, select { width: 100%; padding: 15px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+        .card { border-left: 5px solid #007bff; background: #fff; padding: 15px; margin-bottom: 10px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card-title { font-weight: bold; font-size: 1.1em; color: #333; }
+        .sheet-name { font-size: 0.8em; color: #007bff; margin-bottom: 5px; }
+        .record-tag { display: inline-block; padding: 3px 8px; background: #e74c3c; color: white; border-radius: 4px; font-size: 0.8em; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <div class="tab-menu">
+        <button class="tab-btn active" onclick="openTab('search-tab')">🔍 전체검색</button>
+        <button class="tab-btn" onclick="openTab('place-tab')">📍 장소별 검색</button>
+        <button class="tab-btn" onclick="initCalendar(); openTab('date-tab')">📅 날짜별</button>
+    </div>
+
+    <div id="search-tab" class="content active">
+        <input type="text" id="assetSearch" placeholder="자산번호 또는 기기명 입력..." onkeyup="searchAsset()">
+        <div id="searchResult">모든 시트에서 데이터를 불러오는 중...</div>
+    </div>
+
+    <div id="place-tab" class="content">
+        <select id="placeSelect" onchange="filterByPlace()">
+            <option value="">장소 선택</option>
+            <option value="수원">수원</option>
+            <option value="아산1">아산1</option>
+            <option value="평택">평택</option>
+            <option value="사무실">사무실</option>
+        </select>
+        <div id="placeResult"></div>
+    </div>
+
+    <div id="date-tab" class="content">
+        <div id="calendar"></div>
+        <div id="dateResult" style="margin-top:20px;"></div>
+    </div>
+
+    <script>
+        const sheetId = "12xhA0X6iOrg-4mq9KWZsQ9nPb2818P5VGUDXQMhjeTw";
+        // 형님이 말씀하신 모든 시트 이름 딲 넣어놨습니다.
+        const sheetNames = ["설문지 응답 시트1", "청력기", "청력부스", "중이기기", "소음계", "원심분리기", "HRV", "EKG", "폐활량", "실린지", "프린터기", "업무용노트북", "와이브로", "수원", "아산1", "평택", "사무실"];
+        
+        let allCombinedData = [];
+
+        async function init() {
+            const fetchPromises = sheetNames.map(name => {
+                return new Promise((resolve) => {
+                    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
+                    Papa.parse(url, {
+                        download: true,
+                        header: true,
+                        complete: (results) => {
+                            // 각 데이터에 어떤 시트 출신인지 표시를 남깁니다.
+                            const taggedData = results.data.map(row => ({ ...row, _originSheet: name }));
+                            resolve(taggedData);
+                        },
+                        error: () => resolve([]) // 에러나면 빈값 리턴
+                    });
+                });
+            });
+
+            const results = await Promise.all(fetchPromises);
+            allCombinedData = results.flat().filter(row => row['자산번호']);
+            document.getElementById('searchResult').innerHTML = "데이터 로드 완료! 검색을 시작하세요.";
+        }
+
+        function openTab(id) {
+            document.querySelectorAll('.content, .tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
+
+        function searchAsset() {
+            const val = document.getElementById('assetSearch').value.toLowerCase();
+            const res = allCombinedData.filter(row => 
+                (row['자산번호'] && row['자산번호'].toString().toLowerCase().includes(val)) ||
+                (row['기기명'] && row['기기명'].toLowerCase().includes(val))
+            );
+            render(res, 'searchResult');
+        }
+
+        function filterByPlace() {
+            const val = document.getElementById('placeSelect').value;
+            const res = allCombinedData.filter(row => row['현재위치'] === val || row['_originSheet'] === val);
+            render(res, 'placeResult');
+        }
+
+        let calendar = null;
+        function initCalendar() {
+            if (calendar) return;
+            calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+                initialView: 'dayGridMonth',
+                locale: 'ko',
+                dateClick: (info) => showDateData(info.dateStr)
+            });
+            calendar.render();
+        }
+
+        function showDateData(dateStr) {
+            const day = parseInt(dateStr.split('-')[2]);
+            const colName = `01 / ${day}`;
+            const res = allCombinedData.filter(row => row[colName] && row[colName].trim() !== "");
+            document.getElementById('dateResult').innerHTML = `<h4>📅 ${dateStr} 기록 장비</h4>`;
+            render(res, 'dateResult', colName);
+        }
+
+        function render(data, targetId, col = null) {
+            const target = document.getElementById(targetId);
+            target.innerHTML = data.map(row => `
+                <div class="card">
+                    <div class="sheet-name">[분류: ${row._originSheet}]</div>
+                    <div class="card-title">${row['자산번호']} (${row['기기명'] || '-'})</div>
+                    <div>📍 위치: ${row['현재위치'] || '-'}</div>
+                    ${col ? `<div class="record-tag">기록: ${row[col]}</div>` : ''}
+                </div>
+            `).join('') || '데이터가 없습니다.';
+        }
+
+        init();
+    </script>
+</body>
+</html>
