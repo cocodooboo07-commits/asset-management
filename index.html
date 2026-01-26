@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>자산 관리 시스템</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 10px; background: #f0f2f5; }
+        .tab-menu { display: flex; gap: 5px; margin-bottom: 10px; overflow-x: auto; }
+        .tab-btn { flex: 1; padding: 15px 5px; cursor: pointer; border: none; background: #ccc; font-weight: bold; border-radius: 8px; min-width: 100px; }
+        .tab-btn.active { background: #007bff; color: white; }
+        .content { display: none; background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); min-height: 500px; }
+        .content.active { display: block; }
+        input, select { width: 100%; padding: 15px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+        .card { border-left: 6px solid #007bff; background: #fff; padding: 15px; margin-bottom: 12px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .card-title { font-weight: bold; font-size: 1.1em; color: #333; margin-bottom: 8px; }
+        .card-info { font-size: 0.9em; color: #555; line-height: 1.6; }
+        .memo { margin-top: 10px; padding: 10px; background: #fff1f0; border: 1px solid #ffa39e; border-radius: 5px; color: #cf1322; font-weight: bold; }
+        #loading { text-align: center; padding: 30px; font-weight: bold; color: #007bff; font-size: 1.2em; }
+    </style>
+</head>
+<body>
+
+    <div class="tab-menu">
+        <button class="tab-btn active" onclick="openTab('search-tab')">1. 자산번호 검색</button>
+        <button class="tab-btn" onclick="openTab('place-tab')">2. 장소/장비별</button>
+        <button class="tab-btn" onclick="initCalendar(); openTab('date-tab')">3. 날짜별 달력</button>
+    </div>
+
+    <div id="loading">데이터 로딩 중... 잠시만 기다려주십쇼 형님!</div>
+
+    <div id="search-tab" class="content active">
+        <input type="text" id="assetInput" placeholder="자산번호 입력..." onkeyup="searchByAsset()">
+        <div id="searchResult"></div>
+    </div>
+
+    <div id="place-tab" class="content">
+        <select id="typeSelect" onchange="filterByType()">
+            <option value="">탭 선택 (수원, 아산1, 청력기 등...)</option>
+        </select>
+        <div id="placeResult"></div>
+    </div>
+
+    <div id="date-tab" class="content">
+        <div id="calendar"></div>
+        <div id="dateResult"></div>
+    </div>
+
+    <script>
+        const sheetId = "12xhA0X6iOrg-4mq9KWZsQ9nPb2818P5VGUDXQMhjeTw";
+        const sheetNames = ["청력기","청력부스","중이기기","소음계","원심분리기","HRV","EKG","폐활량","실린지","프린터기","업무용노트북","와이브로","수원","아산1","평택","사무실"];
+        let allData = [];
+
+        async function init() {
+            const promises = sheetNames.map(name => {
+                const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
+                return new Promise(resolve => {
+                    Papa.parse(url, {
+                        download: true, header: true,
+                        complete: res => resolve(res.data.map(row => ({ ...row, _tab: name }))),
+                        error: () => resolve([])
+                    });
+                });
+            });
+            const results = await Promise.all(promises);
+            allData = results.flat().filter(row => Object.values(row).some(v => v));
+            
+            const sel = document.getElementById('typeSelect');
+            sheetNames.forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n; opt.text = n; sel.add(opt);
+            });
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function openTab(id) {
+            document.querySelectorAll('.content, .tab-btn').forEach(e => e.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            event.currentTarget.classList.add('active');
+            if(id === 'date-tab' && calendar) calendar.render();
+        }
+
+        function getVal(row, keyPart) {
+            const k = Object.keys(row).find(k => k.replace(/\s/g, '').includes(keyPart));
+            return row[k] || '';
+        }
+
+        function searchByAsset() {
+            const val = document.getElementById('assetInput').value.toLowerCase();
+            const res = allData.filter(row => getVal(row, '자산번호').toLowerCase().includes(val));
+            render(res, 'searchResult');
+        }
+
+        function filterByType() {
+            const val = document.getElementById('typeSelect').value;
+            const res = allData.filter(row => row._tab === val);
+            render(res, 'placeResult');
+        }
+
+        let calendar;
+        function initCalendar() {
+            if(calendar) return;
+            calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+                initialView: 'dayGridMonth', locale: 'ko',
+                events: (info, success) => {
+                    let evts = [];
+                    allData.forEach(row => {
+                        Object.keys(row).forEach(k => {
+                            if(/\d{1,2}\/\d{1,2}/.test(k) && row[k].trim()) {
+                                const [m, d] = k.split('/');
+                                evts.push({ start: `2025-${m.padStart(2,'0')}-${d.padStart(2,'0')}`, display: 'background', color: '#ff4d4f' });
+                            }
+                        });
+                    });
+                    success(evts);
+                },
+                dateClick: info => showDate(info.dateStr)
+            });
+            calendar.render();
+        }
+
+        function showDate(dateStr) {
+            const [y, m, d] = dateStr.split('-');
+            const searchKey = `${parseInt(m)}/${parseInt(d)}`;
+            const res = allData.filter(row => {
+                const k = Object.keys(row).find(k => k.includes(searchKey));
+                return k && row[k].trim();
+            });
+            document.getElementById('dateResult').innerHTML = `<h3>📅 ${dateStr} 특이사항</h3>`;
+            render(res, 'dateResult', searchKey);
+        }
+
+        function render(data, targetId, dateKey = null) {
+            const target = document.getElementById(targetId);
+            if(!data.length) { target.innerHTML = '<p>데이터가 없습니다.</p>'; return; }
+            target.innerHTML = data.map(row => {
+                const memo = dateKey ? (Object.keys(row).find(k => k.includes(dateKey)) ? row[Object.keys(row).find(k => k.includes(dateKey))] : '') : '';
+                return `
+                    <div class="card">
+                        <div class="card-title">${getVal(row, '자산번호')} <small>[${row._tab}]</small></div>
+                        <div class="card-info">
+                            <b>기기명:</b> ${getVal(row, '기기명')}<br>
+                            <b>모델:</b> ${getVal(row, '모델')}<br>
+                            <b>위치:</b> ${getVal(row, '현재위치') || row._tab}
+                        </div>
+                        ${memo ? `<div class="memo">⚠️ 특이사항: ${memo}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+        init();
+    </script>
+</body>
+</html>
