@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>장비 관리 앱 - 최종</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Malgun Gothic', sans-serif; background: #f0f2f5; padding: 10px; line-height: 1.4; }
+    .header { background: #d63031; color: white; padding: 15px; text-align: center; font-weight: bold; border-radius: 10px; margin-bottom: 10px; }
+    .tabs { display: flex; gap: 5px; margin-bottom: 15px; }
+    .tab { flex: 1; padding: 12px; background: #fff; border: 1px solid #ddd; border-radius: 8px; text-align: center; font-size: 14px; cursor: pointer; font-weight: bold; }
+    .tab.active { background: #d63031; color: white; border-color: #d63031; }
+    .box { background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px; }
+    select { width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 8px; font-size: 15px; margin-bottom: 10px; background: #fafafa; }
+    .card { background: #fff; padding: 15px; margin-bottom: 10px; border-radius: 8px; border-left: 6px solid #d63031; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .card-top { font-size: 13px; color: #666; margin-bottom: 5px; }
+    .card-title { font-weight: bold; font-size: 15px; color: #333; margin-bottom: 8px; }
+    .card-note { background: #fff5f5; padding: 10px; border-radius: 5px; color: #d63031; font-weight: bold; font-size: 14px; border: 1px solid #ff7675; }
+    
+    /* 진짜 달력 스타일 */
+    .calendar { display: grid; grid-template-columns: repeat(7, 1fr); background: #fff; border-radius: 8px; overflow: hidden; border: 1px solid #ddd; }
+    .cal-header { padding: 10px 0; text-align: center; font-weight: bold; background: #f8f9fa; font-size: 12px; border-bottom: 1px solid #ddd; }
+    .cal-day { height: 60px; padding: 5px; border-right: 1px solid #eee; border-bottom: 1px solid #eee; text-align: left; font-size: 12px; cursor: pointer; position: relative; }
+    .cal-day:nth-child(7n) { border-right: none; }
+    .cal-day.issue { background: #fff0f0; }
+    .cal-day.issue::after { content: '●'; color: #d63031; position: absolute; bottom: 5px; right: 5px; font-size: 14px; }
+    .cal-day.selected { background: #d63031 !important; color: white; }
+    .month-nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 0 10px; }
+  </style>
+</head>
+<body>
+
+<div class="header" id="status">데이터 로드 중...</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="setMode('loc')">장소별</div>
+  <div class="tab" onclick="setMode('equip')">장비별</div>
+  <div class="tab" onclick="setMode('date')">날짜별</div>
+</div>
+
+<div id="searchBox" class="box"></div>
+<div id="results"></div>
+
+<script>
+const SHEET_ID = '1qJpWnVNBZIwnwZG4OD3JdUKytVq_4V6n';
+const SHEETS = {
+  '청력기': '1397804768', '청력부스': '1226463543', '중이기기': '1413774664',
+  '소음계': '199554987', '원심분리기': '1627219985', 'HRV': '816640230',
+  'EKG': '914024434', '폐활량': '348975961', '실린지': '874684579',
+  '프린터기': '70160554', '업무용노트북': '811915899', '와이브로': '1793948339'
+};
+
+let allData = [];
+let mode = 'loc';
+let currentMonth = new Date().getMonth() + 1;
+const LOC_LIST = ["1", "2", "3", "4", "5", "6", "아산1", "평택", "수원", "사무실", "센터", "의공실"];
+
+async function load() {
+  allData = [];
+  document.getElementById('status').innerText = '⏳ 최신 데이터 동기화 중...';
+  
+  for (const [name, gid] of Object.entries(SHEETS)) {
+    try {
+      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}&cachebust=${Date.now()}`;
+      const res = await fetch(url);
+      const csv = await res.text();
+      const parsed = Papa.parse(csv.trim(), { header: true, skipEmptyLines: true });
+      
+      parsed.data.forEach(row => {
+        if (row['자산번호'] && row['자산번호'].trim() !== "") {
+          allData.push({ ...row, _equip: name });
+        }
+      });
+    } catch (e) { console.error(name, "로드 실패"); }
+  }
+  
+  document.getElementById('status').innerText = `✅ 총 ${allData.length}대 검색가능 (${new Date().toLocaleDateString('ko-KR')})`;
+  showSearchArea();
+}
+
+function parseLoc(val) {
+  if (!val) return "미지정";
+  for (let l of LOC_LIST) {
+    if (val.includes(l)) return l;
+  }
+  return "기타";
+}
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  showSearchArea();
+}
+
+function showSearchArea() {
+  const box = document.getElementById('searchBox');
+  document.getElementById('results').innerHTML = '';
+
+  if (mode === 'loc') {
+    box.innerHTML = `
+      <label>장소 선택</label>
+      <select id="locSel" onchange="searchByLoc()">
+        <option value="">장소를 선택하세요</option>
+        ${LOC_LIST.map(l => `<option value="${l}">${l}${isNaN(l) ? '' : '팀'}</option>`).join('')}
+      </select>
+    `;
+  } else if (mode === 'equip') {
+    box.innerHTML = `
+      <label>장비 선택</label>
+      <select id="eqSel" onchange="searchByEquip()">
+        <option value="">장비를 선택하세요</option>
+        ${Object.keys(SHEETS).map(e => `<option value="${e}">${e}</option>`).join('')}
+      </select>
+    `;
+  } else {
+    showCalendar();
+  }
+}
+
+function searchByLoc() {
+  const loc = document.getElementById('locSel').value;
+  if (!loc) return;
+  const filtered = allData.filter(r => parseLoc(r['현재위치'] || r['현재 위치']) === loc);
+  displayCards(filtered);
+}
+
+function searchByEquip() {
+  const eq = document.getElementById('eqSel').value;
+  if (!eq) return;
+  const filtered = allData.filter(r => r._equip === eq);
+  displayCards(filtered);
+}
+
+function displayCards(arr) {
+  const res = document.getElementById('results');
+  if (arr.length === 0) { res.innerHTML = '<p style="text-align:center; padding:20px;">데이터가 없습니다.</p>'; return; }
+
+  res.innerHTML = arr.map(r => {
+    const locStr = r['현재위치'] || r['현재 위치'] || '';
+    const dateKeys = Object.keys(r).filter(k => k.match(/^\d{2}\/\d{2}$/)).sort().reverse();
+    const lastDate = dateKeys.find(k => r[k] && r[k].trim());
+    const note = lastDate ? r[lastDate] : '기록 없음';
+    
+    let status = "보유";
+    if (note.includes("반납")) status = "반납";
+    else if (note.includes("수령")) status = "수령";
+    else if (note.includes("수령예정")) status = "수령예정";
+
+    const teamPrefix = isNaN(parseLoc(locStr)) ? "" : "팀";
+    const locDisplay = `${parseLoc(locStr)}${teamPrefix}`;
+
+    return `
+      <div class="card">
+        <div class="card-top">${locDisplay} ${status} / ${r._equip} / ${r['자산번호']}</div>
+        <div class="card-note">${lastDate || '최근'} - ${note}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function showCalendar() {
+  const box = document.getElementById('searchBox');
+  const year = 2025;
+  const firstDay = new Date(year, currentMonth - 1, 1).getDay();
+  const lastDate = new Date(year, currentMonth, 0).getDate();
+
+  // 특이사항(진짜 이슈) 있는 날짜 수집
+  const issueDates = new Set();
+  allData.forEach(r => {
+    Object.keys(r).forEach(k => {
+      if (k.match(/^\d{2}\/\d{2}$/) && r[k] && r[k].trim() !== "" && !r[k].includes("특이사항 없음")) {
+        issueDates.add(k);
+      }
+    });
+  });
+
+  let calHtml = `
+    <div class="month-nav">
+      <button onclick="moveMonth(-1)">◀</button>
+      <strong>${year}년 ${currentMonth}월</strong>
+      <button onclick="moveMonth(1)">▶</button>
+    </div>
+    <div class="calendar">
+      ${['일','월','화','수','목','금','토'].map(d=>`<div class="cal-header">${d}</div>`).join('')}
+  `;
+
+  for (let i = 0; i < firstDay; i++) calHtml += '<div></div>';
+  for (let d = 1; d <= lastDate; d++) {
+    const dateStr = `${String(currentMonth).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
+    const isIssue = issueDates.has(dateStr);
+    calHtml += `<div class="cal-day ${isIssue ? 'issue' : ''}" onclick="showDateRecords('${dateStr}')">${d}</div>`;
+  }
+  calHtml += '</div><div id="calDetail" style="margin-top:15px;"></div>';
+  box.innerHTML = calHtml;
+}
+
+function moveMonth(v) {
+  currentMonth += v;
+  if (currentMonth > 12) currentMonth = 1;
+  if (currentMonth < 1) currentMonth = 12;
+  showCalendar();
+}
+
+function showDateRecords(date) {
+  document.querySelectorAll('.cal-day').forEach(el => el.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+
+  const filtered = allData.filter(r => r[date] && r[date].trim() !== "" && !r[date].includes("특이사항 없음"));
+  const detail = document.getElementById('calDetail');
+
+  if (filtered.length === 0) {
+    detail.innerHTML = `<p style="text-align:center; color:#999; padding:20px;">${date} 특이사항 없음</p>`;
+    return;
+  }
+
+  detail.innerHTML = filtered.map(r => `
+    <div class="card">
+      <div class="card-top">${parseLoc(r['현재위치'])} / ${r._equip}</div>
+      <div class="card-title">${r['자산번호']}</div>
+      <div class="card-note">${r[date]}</div>
+    </div>
+  `).join('');
+}
+
+load();
+</script>
+</body>
+</html>
