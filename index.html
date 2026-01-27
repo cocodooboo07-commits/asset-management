@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>자산 관리 시스템</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Malgun Gothic', sans-serif; background: #f0f2f5; padding: 10px; }
+    .header { background: #d63031; color: white; padding: 15px; text-align: center; font-weight: bold; border-radius: 10px; margin-bottom: 15px; }
+    .tabs { display: flex; gap: 5px; margin-bottom: 15px; }
+    .tab { flex: 1; padding: 15px; background: #fff; border: 2px solid #ddd; border-radius: 8px; text-align: center; font-weight: bold; cursor: pointer; transition: 0.3s; }
+    .tab.active { background: #d63031; color: white; border-color: #d63031; }
+    .search-box { background: #fff; padding: 20px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    label { display: block; font-weight: bold; margin-bottom: 8px; color: #2d3436; font-size: 15px; }
+    input, select { width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 15px; }
+    input:focus, select:focus { border-color: #d63031; outline: none; }
+    .month-section { margin-bottom: 20px; }
+    .month-title { background: #d63031; color: white; padding: 10px; border-radius: 8px 8px 0 0; font-weight: bold; text-align: center; }
+    .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; background: #fff; padding: 10px; border-radius: 0 0 8px 8px; }
+    .cal-day { padding: 15px 8px; background: #f8f9fa; border: 2px solid #ddd; border-radius: 8px; text-align: center; cursor: pointer; font-size: 14px; font-weight: 600; }
+    .cal-day.has-data { background: #ff7675; color: white; font-weight: bold; border-color: #d63031; }
+    .cal-day.selected { background: #d63031; color: white; box-shadow: 0 0 15px rgba(214,48,49,0.6); transform: scale(1.05); }
+    .card { background: #fff; padding: 18px; margin-bottom: 12px; border-radius: 8px; border-left: 5px solid #d63031; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    .card-title { font-weight: bold; font-size: 1.1em; color: #2d3436; margin-bottom: 8px; }
+    .card-note { background: #fff5f5; padding: 12px; border-radius: 6px; color: #d63031; font-weight: bold; border: 2px solid #ff7675; line-height: 1.6; }
+    .loading { text-align: center; padding: 40px; font-size: 18px; color: #666; }
+  </style>
+</head>
+<body>
+
+<div class="header" id="status">🚀 데이터 로딩 중...</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="setMode('asset')">자산번호</div>
+  <div class="tab" onclick="setMode('location')">장소별</div>
+  <div class="tab" onclick="setMode('date')">날짜별</div>
+</div>
+
+<div class="search-box" id="searchBox"></div>
+<div id="results"></div>
+
+<script>
+const SHEET_ID = '1qJpWnVNBZIwnwZG4OD3JdUKytVq_4V6n';
+const EQUIPMENT_SHEETS = {
+  '청력기': '1397804768',
+  '청력부스': '1226463543',
+  '중이기기': '1413774664',
+  '소음계': '199554987',
+  '원심분리기': '1627219985',
+  'HRV': '816640230',
+  'EKG': '914024434',
+  '폐활량': '348975961',
+  '실린지': '874684579',
+  '프린터기': '70160554',
+  '업무용노트북': '811915899',
+  '와이브로': '1793948339'
+};
+
+let allData = [];
+let currentMode = 'asset';
+let selectedLocation = '';
+
+async function loadAllSheets() {
+  const statusBar = document.getElementById('status');
+  allData = [];
+  
+  for (const [name, gid] of Object.entries(EQUIPMENT_SHEETS)) {
+    statusBar.innerText = `⏳ ${name} 로딩 중...`;
+    try {
+      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}&cache=${Date.now()}`;
+      const response = await fetch(url);
+      const csv = await response.text();
+      const parsed = Papa.parse(csv, { 
+        header: true, 
+        skipEmptyLines: 'greedy',
+        transformHeader: h => h.trim()
+      });
+      
+      console.log(`${name}: ${parsed.data.length}행 읽음`);
+      
+      parsed.data.forEach(row => {
+        if (row['자산번호'] || row['기기명']) {
+          allData.push({ ...row, _equipment: name });
+        }
+      });
+    } catch (e) {
+      console.error(`${name} 로드 실패:`, e);
+    }
+  }
+  
+  statusBar.innerText = `✅ ${allData.length}개 자산 로드 완료`;
+  renderSearch();
+}
+
+function setMode(mode) {
+  currentMode = mode;
+  selectedLocation = '';
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  renderSearch();
+}
+
+function renderSearch() {
+  const box = document.getElementById('searchBox');
+  
+  if (currentMode === 'asset') {
+    box.innerHTML = '<label>자산번호 입력 (QR 스캔)</label><input type="text" id="assetInput" placeholder="자산번호 입력..." oninput="searchAsset()">';
+    document.getElementById('results').innerHTML = '<div class="loading">자산번호를 입력하세요</div>';
+  } else if (currentMode === 'location') {
+    const locations = ['수원', '아산1', '평택', '사무실'];
+    const equipments = Object.keys(EQUIPMENT_SHEETS);
+    
+    box.innerHTML = `
+      <label>1. 장소 선택</label>
+      <select id="locationSelect" onchange="selectLocation()">
+        <option value="">선택하세요</option>
+        ${locations.map(loc => `<option value="${loc}">${loc}</option>`).join('')}
+      </select>
+      
+      <div id="equipmentSelectBox" style="display:none;">
+        <label>2. 장비 선택 (선택안하면 전체)</label>
+        <select id="equipmentSelect" onchange="searchByLocation()">
+          <option value="">전체 장비</option>
+          ${equipments.map(eq => `<option value="${eq}">${eq}</option>`).join('')}
+        </select>
+      </div>
+    `;
+    document.getElementById('results').innerHTML = '<div class="loading">장소를 선택하세요</div>';
+  } else if (currentMode === 'date') {
+    renderCalendar();
+  }
+}
+
+function selectLocation() {
+  selectedLocation = document.getElementById('locationSelect').value;
+  if (selectedLocation) {
+    document.getElementById('equipmentSelectBox').style.display = 'block';
+    searchByLocation();
+  } else {
+    document.getElementById('equipmentSelectBox').style.display = 'none';
+    document.getElementById('results').innerHTML = '<div class="loading">장소를 선택하세요</div>';
+  }
+}
+
+function searchAsset() {
+  const search = document.getElementById('assetInput').value.trim();
+  if (!search) {
+    document.getElementById('results').innerHTML = '<div class="loading">자산번호를 입력하세요</div>';
+    return;
+  }
+  
+  const found = allData.filter(row => row['자산번호'].includes(search));
+  displayResults(found);
+}
+
+function searchByLocation() {
+  const location = document.getElementById('locationSelect').value;
+  const equipment = document.getElementById('equipmentSelect').value;
+  
+  if (!location) {
+    document.getElementById('results').innerHTML = '<div class="loading">장소를 선택하세요</div>';
+    return;
+  }
+  
+  console.log('검색 장소:', location);
+  console.log('전체 데이터:', allData.length);
+  
+  let found = allData.filter(row => {
+    const rowLoc = (row['현재위치'] || row['현재 위치'] || '').toLowerCase();
+    const match = rowLoc.includes(location.toLowerCase()) || 
+                  rowLoc.includes(location.replace('아산1', '아산')) ||
+                  rowLoc.includes(location.replace('1', ''));
+    
+    if (match) {
+      console.log('매칭된 데이터:', row['자산번호'], rowLoc);
+    }
+    return match;
+  });
+  
+  console.log('장소 매칭 결과:', found.length);
+  
+  if (equipment) {
+    found = found.filter(row => row._equipment === equipment);
+    console.log('장비 필터 후:', found.length);
+  }
+  
+  displayResults(found);
+}
+
+function renderCalendar() {
+  const datesWithData = new Set();
+  
+  allData.forEach(row => {
+    Object.keys(row).forEach(key => {
+      if (key.match(/^\d{2}\/\d{2}$/) && row[key] && row[key].trim()) {
+        datesWithData.add(key);
+      }
+    });
+  });
+  
+  let cal = '<label>날짜 선택 (빨간색 = 특이사항 있음)</label>';
+  
+  for (let month = 1; month <= 12; month++) {
+    cal += `<div class="month-section" id="month-${month}">`;
+    cal += `<div class="month-title">${month}월</div>`;
+    cal += `<div class="calendar">`;
+    
+    const daysInMonth = new Date(2025, month, 0).getDate();
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+      const hasData = datesWithData.has(date);
+      cal += `<div class="cal-day ${hasData ? 'has-data' : ''}" onclick="selectDate('${date}', ${month})">${day}일</div>`;
+    }
+    cal += `</div>`;
+    cal += `<div id="result-month-${month}" style="margin-top: 10px;"></div>`;
+    cal += `</div>`;
+  }
+  
+  document.getElementById('searchBox').innerHTML = cal;
+  document.getElementById('results').innerHTML = '';
+}
+
+function selectDate(date, month) {
+  document.querySelectorAll('.cal-day').forEach(d => d.classList.remove('selected'));
+  event.target.classList.add('selected');
+  
+  for (let m = 1; m <= 12; m++) {
+    document.getElementById(`result-month-${m}`).innerHTML = '';
+  }
+  
+  const found = allData.filter(row => row[date] && row[date].trim());
+  
+  if (found.length === 0) {
+    document.getElementById(`result-month-${month}`).innerHTML = '<div class="loading">해당 날짜에 특이사항이 없습니다</div>';
+    return;
+  }
+  
+  const results = found.map(row => {
+    const equipment = row._equipment;
+    const assetNum = row['자산번호'];
+    const noteText = row[date];
+    
+    return `
+      <div class="card">
+        <div class="card-title">${equipment} / ${assetNum}</div>
+        <div class="card-note">${date} - ${noteText}</div>
+      </div>
+    `;
+  }).join('');
+  
+  document.getElementById(`result-month-${month}`).innerHTML = results;
+}
+
+function displayResults(data) {
+  if (data.length === 0) {
+    document.getElementById('results').innerHTML = '<div class="loading">검색 결과가 없습니다</div>';
+    return;
+  }
+  
+  const html = data.map(row => {
+    const equipment = row._equipment;
+    const assetNum = row['자산번호'] || '?';
+    const location = (row['현재위치'] || row['현재 위치'] || '').trim() || '?';
+    const model = row['모델'] || '';
+    
+    const dateKeys = Object.keys(row).filter(k => k.match(/^\d{2}\/\d{2}$/)).sort().reverse();
+    const lastDate = dateKeys.find(k => row[k] && row[k].trim());
+    const noteText = lastDate ? row[lastDate] : '특이사항 없음';
+    
+    return `
+      <div class="card">
+        <div class="card-title">${location} / ${equipment} / ${assetNum}</div>
+        ${model ? `<div style="color: #666; margin-bottom: 8px;">모델: ${model}</div>` : ''}
+        <div class="card-note">${lastDate || ''} - ${noteText}</div>
+      </div>
+    `;
+  }).join('');
+  
+  document.getElementById('results').innerHTML = html;
+}
+
+loadAllSheets();
+</script>
+
+</body>
+</html>
