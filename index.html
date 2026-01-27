@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>장비 관리 시스템</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Malgun Gothic', sans-serif; background: #f0f2f5; padding: 10px; }
+    .header { background: #d63031; color: white; padding: 15px; text-align: center; font-weight: bold; border-radius: 10px; margin-bottom: 10px; }
+    .tabs { display: flex; gap: 5px; margin-bottom: 15px; }
+    .tab { flex: 1; padding: 15px; background: #fff; border: 2px solid #ddd; border-radius: 8px; text-align: center; font-weight: bold; cursor: pointer; }
+    .tab.active { background: #d63031; color: white; }
+    .box { background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 10px; }
+    label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px; }
+    select { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 10px; }
+    .card { background: #fff; padding: 15px; margin-bottom: 10px; border-radius: 8px; border-left: 8px solid #d63031; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .card-title { font-weight: bold; font-size: 15px; color: #333; margin-bottom: 8px; }
+    .card-note { background: #fdf2f2; padding: 10px; border-radius: 5px; color: #d63031; font-weight: bold; font-size: 14px; border: 1px solid #ff7675; }
+    .info-line { font-size: 13px; color: #666; margin-bottom: 5px; }
+    .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: #ddd; border-radius: 8px; overflow: hidden; }
+    .cal-header { padding: 10px; text-align: center; font-weight: bold; background: #f8f9fa; font-size: 12px; }
+    .cal-day { height: 60px; background: #fff; padding: 5px; text-align: left; font-size: 12px; cursor: pointer; position: relative; }
+    .cal-day.issue::after { content: '🔴'; position: absolute; bottom: 3px; right: 5px; font-size: 10px; }
+    .cal-day.selected { background: #d63031 !important; color: white !important; }
+    .month-nav { display: flex; justify-content: space-between; align-items: center; margin: 10px 0; }
+    .month-nav button { padding: 10px 20px; background: #d63031; color: white; border: none; border-radius: 8px; cursor: pointer; }
+  </style>
+</head>
+<body>
+<div class="header" id="status">데이터 로드 중...</div>
+<div class="tabs">
+  <div class="tab active" id="tab-eq" onclick="setMode('equip')">장비→장소</div>
+  <div class="tab" id="tab-dt" onclick="setMode('date')">날짜별</div>
+</div>
+<div id="searchBox" class="box"></div>
+<div id="results"></div>
+
+<script>
+const SID = '1qJpWnVNBZIwnwZG4OD3JdUKytVq_4V6n';
+const LOG_SHEETS = {'청력기':'1397804768','청력부스':'1226463543','중이기기':'1413774664','소음계':'199554987','원심분리기':'1627219985','HRV':'816640230','EKG':'914024434','폐활량':'348975961','실린지':'874684579','프린터기':'70160554','업무용노트북':'811915899','와이브로':'1793948339'};
+let allData = [];
+let mode = 'equip';
+let year = 2026;
+let month = 1;
+
+// 특이사항 무시 목록
+const IGN = ['정상','이상없음','이상 없음','완료','-','없음','',' '];
+
+async function load() {
+  allData = [];
+  document.getElementById('status').innerText = '⏳ 시트 데이터 읽는 중...';
+
+  for (const [nm, gid] of Object.entries(LOG_SHEETS)) {
+    try {
+      const url = `https://docs.google.com/spreadsheets/d/${SID}/export?format=csv&gid=${gid}&t=${Date.now()}`;
+      const res = await fetch(url);
+      const csv = await res.text();
+      const p = Papa.parse(csv.trim(), {header: true, skipEmptyLines: true});
+      
+      p.data.forEach(r => {
+        const locRaw = (r['현재위치'] || r['현재 위치'] || '').toString().trim();
+        let loc = '기타';
+        
+        // 형님 요청: 1~6팀, 평택, 아산1, 수원, 사무실, 의공실, 센터 분류
+        if (locRaw.includes('평택')) loc = '평택';
+        else if (locRaw.includes('아산1')) loc = '아산1';
+        else if (locRaw.includes('수원')) loc = '수원';
+        else if (locRaw.includes('사무실')) loc = '사무실';
+        else if (locRaw.includes('의공실')) loc = '의공실';
+        else if (locRaw.includes('센터')) loc = '센터';
+        else {
+          const m = locRaw.match(/[1-6]/);
+          if (m) loc = m[0] + '팀';
+        }
+
+        allData.push({ ...r, _eq: nm, _loc: loc });
+      });
+    } catch (e) { console.error(nm, '로드 실패'); }
+  }
+  document.getElementById('status').innerText = `✅ 총 ${allData.length}대 로드 완료`;
+  show();
+}
+
+function isIssue(t) {
+  if (!t) return false;
+  const c = t.toString().replace(/\s/g, '');
+  return !IGN.some(i => i === c);
+}
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('tab-eq').classList.toggle('active', m === 'equip');
+  document.getElementById('tab-dt').classList.toggle('active', m === 'date');
+  show();
+}
+
+function show() {
+  const b = document.getElementById('searchBox');
+  document.getElementById('results').innerHTML = '';
+  if (mode === 'equip') {
+    b.innerHTML = `
+      <label>장비 선택</label>
+      <select id="es" onchange="uL()">
+        <option value="">-- 선택 --</option>
+        ${Object.keys(LOG_SHEETS).map(e=>`<option value="${e}">${e}</option>`).join('')}
+      </select>
+      <div id="lb" style="display:none">
+        <label>장소 필터 (현재위치 기준)</label>
+        <select id="ls" onchange="dS()"></select>
+      </div>`;
+  } else {
+    showCal();
+  }
+}
+
+function uL() {
+  const e = document.getElementById('es').value;
+  if (!e) { document.getElementById('lb').style.display='none'; return; }
+  const f = allData.filter(r => r._eq === e);
+  const ls = [...new Set(f.map(r => r._loc))].sort();
+  document.getElementById('ls').innerHTML = '<option value="">전체</option>' + ls.map(l=>`<option value="${l}">${l}</option>`).join('');
+  document.getElementById('lb').style.display='block';
+  dS();
+}
+
+function dS() {
+  const e = document.getElementById('es').value;
+  const l = document.getElementById('ls').value;
+  let f = allData.filter(r => r._eq === e);
+  if (l) f = f.filter(r => r._loc === l);
+
+  document.getElementById('results').innerHTML = f.map(r => {
+    const dates = Object.keys(r).filter(k => k.match(/^\d{1,2}[\/\-]\d{1,2}$/)).sort((a,b)=>b.localeCompare(a));
+    const lastD = dates[0] || '기록없음';
+    const lastV = r[lastD] || '내용없음';
+    
+    return `
+      <div class="card">
+        <div class="card-title">${r._loc} / ${r._eq} / ${r['자산번호']||r['자산 번호']||'No.'}</div>
+        <div class="info-line">👤 관리자: ${r['관리자']||r['담당자']||'미지정'}</div>
+        <div class="card-note">📅 ${lastD}: ${lastV}</div>
+      </div>`;
+  }).join('');
+}
+
+function showCal() {
+  const b = document.getElementById('searchBox');
+  const issues = new Set();
+  allData.forEach(r => {
+    Object.keys(r).forEach(k => {
+      if (k.match(/^\d{1,2}[\/\-]\d{1,2}$/) && isIssue(r[k])) {
+        const p = k.split(/[\/\-]/);
+        issues.add(`${p[0].padStart(2,'0')}/${p[1].padStart(2,'0')}`);
+      }
+    });
+  });
+
+  const fd = new Date(year, month - 1, 1).getDay();
+  const ld = new Date(year, month, 0).getDate();
+  let h = `<div class="month-nav"><button onclick="mM(-1)">◀</button><b>${year}년 ${month}월</b><button onclick="mM(1)">▶</button></div><div class="calendar">`;
+  ['일','월','화','수','목','금','토'].forEach(d => h += `<div class="cal-header">${d}</div>`);
+  for (let i = 0; i < fd; i++) h += '<div></div>';
+  for (let d = 1; d <= ld; d++) {
+    const ds = `${month.toString().padStart(2,'0')}/${d.toString().padStart(2,'0')}`;
+    h += `<div class="cal-day ${issues.has(ds)?'issue':''}" onclick="sD('${ds}',this)">${d}</div>`;
+  }
+  b.innerHTML = h + '</div><div id="dr"></div>';
+}
+
+function mM(v) { month += v; if (month > 12) { month = 1; year++; } else if (month < 1) { month = 12; year--; } showCal(); }
+
+function sD(ds, el) {
+  document.querySelectorAll('.cal-day').forEach(x => x.classList.remove('selected'));
+  el.classList.add('selected');
+  const [targetM, targetD] = ds.split('/').map(Number);
+  
+  const f = allData.filter(r => {
+    return Object.keys(r).some(k => {
+      const p = k.split(/[\/\-]/);
+      return p.length === 2 && Number(p[0]) === targetM && Number(p[1]) === targetD && isIssue(r[k]);
+    });
+  });
+
+  document.getElementById('dr').innerHTML = f.length === 0 ? '<p style="padding:20px;text-align:center;">특이사항 없음</p>' : f.map(r => {
+    const k = Object.keys(r).find(x => {
+      const p = x.split(/[\/\-]/);
+      return p.length === 2 && Number(p[0]) === targetM && Number(p[1]) === targetD;
+    });
+    return `
+      <div class="card">
+        <div class="card-title">${r._loc} / ${r._eq}</div>
+        <div class="card-note">${r[k]}</div>
+      </div>`;
+  }).join('');
+}
+
+load();
+</script>
+</body>
+</html>
