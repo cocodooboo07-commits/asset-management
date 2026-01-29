@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>장비 관리 시스템</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Malgun Gothic', sans-serif; background: #f0f2f5; padding: 10px; }
+    .header { background: #d63031; color: white; padding: 15px; text-align: center; font-weight: bold; border-radius: 10px; margin-bottom: 10px; font-size: 14px; }
+    .tabs { display: flex; gap: 5px; margin-bottom: 15px; }
+    .tab { flex: 1; padding: 12px; background: #fff; border: 2px solid #ddd; border-radius: 8px; text-align: center; font-weight: bold; cursor: pointer; font-size: 13px; }
+    .tab.active { background: #d63031; color: white; }
+    .box { background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px; }
+    select { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 10px; }
+    .calendar { display: grid; grid-template-columns: repeat(7, 1fr); background: #eee; gap: 1px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+    .cal-header { padding: 10px; text-align: center; font-weight: bold; background: #f8f9fa; font-size: 12px; }
+    .cal-day { height: 60px; background: #fff; padding: 5px; text-align: left; font-size: 12px; cursor: pointer; position: relative; }
+    .cal-day.issue { background: #fff0f0; }
+    .cal-day.issue::after { content: '⚠️'; position: absolute; bottom: 5px; right: 5px; font-size: 12px; color: #d63031; }
+    .cal-day.selected { background: #d63031 !important; color: white !important; }
+    .card { background: #fff; padding: 15px; margin-bottom: 10px; border-radius: 8px; border-left: 8px solid #d63031; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .card.normal { border-left-color: #2d3436; }
+    .card.issue { border-left-color: #d63031; background: #fff5f5; }
+    .card-title { font-weight: bold; font-size: 15px; color: #333; margin-bottom: 5px; }
+    .card-note { background: #fdf2f2; padding: 10px; border-radius: 5px; color: #d63031; font-weight: bold; font-size: 14px; border: 1px solid #ff7675; }
+    .card-note.normal { background: #f8f9fa; color: #2d3436; border-color: #dfe6e9; }
+    .month-nav { display: flex; justify-content: space-between; align-items: center; margin: 10px 0; }
+    .month-nav button { padding: 10px 20px; background: #d63031; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    .download-btn { display: inline-block; margin-top: 10px; padding: 12px 24px; background: #00b894; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; text-decoration: none; }
+    .download-btn:hover { background: #00a383; }
+    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+    .modal-content { background: white; margin: 10% auto; padding: 30px; border-radius: 12px; width: 90%; max-width: 400px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .modal-title { font-size: 20px; font-weight: bold; margin-bottom: 20px; color: #2d3436; }
+    .modal-close { float: right; font-size: 28px; font-weight: bold; color: #aaa; cursor: pointer; }
+    .modal-close:hover { color: #000; }
+    .recipient-btn { display: block; width: 100%; padding: 15px; margin: 8px 0; background: #f8f9fa; border: 2px solid #dfe6e9; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.3s; }
+    .recipient-btn:hover { background: #d63031; color: white; border-color: #d63031; }
+    .equipment-checkbox { width: 20px; height: 20px; margin-right: 10px; cursor: pointer; }
+    .select-all-btn { padding: 10px 20px; background: #0984e3; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-right: 10px; }
+    .select-all-btn:hover { background: #0770c9; }
+    .send-email-btn { padding: 12px 30px; background: #00b894; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px; }
+    .send-email-btn:hover { background: #00a383; }
+    .send-email-btn:disabled { background: #b2bec3; cursor: not-allowed; }
+    .button-group { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px; }
+  </style>
+</head>
+<body>
+<div class="header" id="status">데이터 연결 중... (v2026-01-28 19:25)</div>
+<div class="tabs">
+  <div class="tab active" id="tab-equip" onclick="setMode('equip')">장비 → 장소</div>
+  <div class="tab" id="tab-location" onclick="setMode('location')">장소</div>
+  <div class="tab" id="tab-date" onclick="setMode('date')">날짜별 기록</div>
+</div>
+<div id="searchBox" class="box"></div>
+<div id="results"></div>
+
+<!-- 메일 수신자 선택 모달 -->
+<div id="emailModal" class="modal">
+  <div class="modal-content">
+    <span class="modal-close" onclick="closeEmailModal()">&times;</span>
+    <div class="modal-title">📧 수신자 선택</div>
+    <div id="recipientList"></div>
+  </div>
+</div>
+
+<script>
+const SHEET_ID = '12xhA0X6iOrg-4mq9KWZsQ9nPb2818P5VGUDXQMhjeTw';
+const SHEETS = { 
+  '청력기': '1720829217', '청력부스': '783939503', '중이기기': '951007328', 
+  '소음계': '389015843', '원심분리기': '1430550353', 'HRV': '575182905', 
+  'EKG': '37674733', '폐활량': '2106009043', '실린지': '829162327', 
+  '프린터기': '283353512', '업무용노트북': '239338022', '와이브로': '763688386' 
+};
+
+let allData = [];
+let mode = 'equip';
+let currentYear = 2026;
+let currentMonth = 1;
+const IGNORE_TEXT = ["특이사항없음", "특이사항 없음", "이상없음", "이상 없음"];
+const FIXED_LOCATIONS = ['1', '2', '3', '4', '5', '6', '평택', '수원', '아산1', '사무실', '의공실', '센터', '미선택'];
+
+// Google Apps Script 웹 앱 URL (배포 후 여기에 URL 입력)
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzNrE3s08iOZndyR7estzZOMw_vd5BHz6zqwd0ogki5m00C6dOxRiySD4VgIy2Io3AQ/exec';
+
+// 메일 발신자 목록 (보내는 사람 선택용)
+const EMAIL_SENDERS = {
+  '김민철': 'minchul9237.kim@samsung.com',
+  '김민선': 'ms0602.kim@samsung.com',
+  '김태용': 'taeyoung0404.kim@samsung.com',
+  '안성진': 'sj0206.ahn@samsung.com',
+  '백수빈': 'subeen2319.baek@samsung.com',
+};
+
+// 메일 수신자 목록 (받는 사람 선택용)
+const EMAIL_RECIPIENTS = {
+  '김민철': 'minchul9237.kim@samsung.com',
+  '김민선': 'ms0602.kim@samsung.com',
+  '김태용': 'taeyoung0404.kim@samsung.com',
+  '남윤영': 'yunyoung2433.nam@samsung.com',
+  '이동수': 'ds0317.lee@samsung.com',
+  '석혜윤': 'hyeyoon.seok@samsung.com',
+  '안성진': 'sj0206.ahn@samsung.com',
+  '백수빈': 'subeen2319.baek@samsung.com',
+};
+
+async function load() {
+  allData = [];
+  const startTime = new Date();
+  document.getElementById('status').innerText = 'Loading... (v2026-01-28 19:15)';
+  
+  for (const [name, gid] of Object.entries(SHEETS)) {
+    try {
+      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}&t=${Date.now()}`;
+      const res = await fetch(url, { cache: 'no-store' });
+      const csv = await res.text();
+      const parsed = Papa.parse(csv.trim(), { header: true, skipEmptyLines: true });
+      
+      parsed.data.forEach(row => {
+        const assetNum = row['자산번호'] || row['자산 번호'] || '';
+        if (assetNum && assetNum.trim()) {
+          allData.push({ ...row, _equip: name });
+        }
+      });
+    } catch (e) {
+      console.error(name + ' failed:', e);
+    }
+  }
+  
+  const loadTime = ((new Date() - startTime) / 1000).toFixed(1);
+  document.getElementById('status').innerText = allData.length + ' devices (' + loadTime + 's) - v2026-01-28 19:15';
+  show();
+}
+
+function isRealIssue(text) {
+  if (!text || !text.trim()) return false;
+  const clean = text.replace(/\s/g, "").toLowerCase();
+  
+  // 정확히 "특이사항 없음" 또는 "이상 없음"만 제외
+  for (const ig of IGNORE_TEXT) {
+    const cleanIgnore = ig.replace(/\s/g, "").toLowerCase();
+    if (clean === cleanIgnore || clean.includes(cleanIgnore)) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+function parseCurrentLocation(row) {
+  const val = row['현재위치'] || row['현재 위치'] || '';
+  if (!val || !val.trim()) return { location: "미선택", date: null };
+  
+  const str = val.toString().trim();
+  const dateMatch = str.match(/\((\d{1,2})\/(\d{1,2})\)/);
+  const date = dateMatch ? dateMatch[1].padStart(2, '0') + '/' + dateMatch[2].padStart(2, '0') : null;
+  
+  const cleanStr = str.replace(/\(.*?\)/g, '').trim();
+  
+  let location = "미선택";
+  if (cleanStr.includes('아산1')) location = '아산1';
+  else if (cleanStr.includes('평택')) location = '평택';
+  else if (cleanStr.includes('수원')) location = '수원';
+  else if (cleanStr.includes('사무실')) location = '사무실';
+  else if (cleanStr.includes('센터')) location = '센터';
+  else if (cleanStr.includes('의공실')) location = '의공실';
+  else {
+    const match = cleanStr.match(/(?:^|[^\d])([1-6])(?:팀|[^\d]|$)/);
+    if (match) location = match[1];
+  }
+  
+  return { location, date };
+}
+
+function getEquipmentNumber(row) {
+  const equipName = row['기기명'] || '';
+  const match = equipName.match(/\((\d+)\)/);
+  return match ? match[1] : '';
+}
+
+function getDetailByDate(row, targetDate) {
+  if (!targetDate) return null;
+  const dateKeys = Object.keys(row).filter(k => k.match(/^\d{1,2}[\/\-]\d{1,2}$/));
+  
+  for (const key of dateKeys) {
+    const normalized = key.trim().replace('-', '/').split('/').map(p => p.padStart(2, '0')).join('/');
+    if (normalized === targetDate && row[key] && row[key].trim()) {
+      return row[key].trim();
+    }
+  }
+  return null;
+}
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('tab-equip').classList.toggle('active', m === 'equip');
+  document.getElementById('tab-location').classList.toggle('active', m === 'location');
+  document.getElementById('tab-date').classList.toggle('active', m === 'date');
+  show();
+}
+
+function show() {
+  const b = document.getElementById('searchBox');
+  document.getElementById('results').innerHTML = '';
+  
+  if (mode === 'equip') {
+    // 각 장비별 개수 계산
+    const equipCounts = {};
+    Object.keys(SHEETS).forEach(name => {
+      equipCounts[name] = allData.filter(r => r._equip === name).length;
+    });
+    
+    b.innerHTML = '<label>장비 선택</label><select id="es" onchange="updateLocations()"><option value="">선택</option>' + Object.keys(SHEETS).map(e => '<option value="' + e + '">' + e + ' (' + equipCounts[e] + '개)</option>').join('') + '</select><div id="lb" style="display:none"><label>장소 필터</label><select id="ls" onchange="displayResults()"><option value="">장소 선택</option></select></div>';
+  } else if (mode === 'location') {
+    // 각 장소별 개수 계산
+    const locationCounts = {};
+    FIXED_LOCATIONS.forEach(loc => {
+      locationCounts[loc] = allData.filter(r => parseCurrentLocation(r).location === loc).length;
+    });
+    
+    b.innerHTML = '<label>장소 선택</label><select id="locationSelect" onchange="displayLocationResults()"><option value="">선택</option>' + FIXED_LOCATIONS.map(l => '<option value="' + l + '">' + (/^[1-6]$/.test(l) ? l + '팀' : l) + ' (' + locationCounts[l] + '개)</option>').join('') + '</select>';
+  } else {
+    showCalendar();
+  }
+}
+
+function updateLocations() {
+  const eq = document.getElementById('es').value;
+  if (!eq) {
+    document.getElementById('lb').style.display = 'none';
+    document.getElementById('results').innerHTML = '';
+    return;
+  }
+  
+  // 해당 장비의 장소별 개수 계산
+  const locationCounts = {};
+  FIXED_LOCATIONS.forEach(loc => {
+    locationCounts[loc] = allData.filter(r => r._equip === eq && parseCurrentLocation(r).location === loc).length;
+  });
+  
+  document.getElementById('ls').innerHTML = '<option value="">장소 선택</option>' + FIXED_LOCATIONS.map(l => '<option value="' + l + '">' + (/^[1-6]$/.test(l) ? l + '팀' : l) + ' (' + locationCounts[l] + '개)</option>').join('');
+  document.getElementById('lb').style.display = 'block';
+  document.getElementById('results').innerHTML = '';
+}
+
+function displayResults() {
+  const eq = document.getElementById('es').value;
+  const loc = document.getElementById('ls').value;
+  
+  if (!loc) {
+    document.getElementById('results').innerHTML = '<p style="padding:20px; text-align:center; color:#999;">장소를 선택해주세요</p>';
+    return;
+  }
+  
+  let found = allData.filter(r => r._equip === eq && parseCurrentLocation(r).location === loc);
+  
+  if (found.length === 0) {
+    document.getElementById('results').innerHTML = '<p style="padding:20px; text-align:center; color:#999;">해당 장소에 장비가 없습니다</p>';
+    return;
+  }
+  
+  document.getElementById('results').innerHTML = found.map(r => {
+    const data = parseCurrentLocation(r);
+    const locName = /^[1-6]$/.test(data.location) ? data.location + '팀' : data.location;
+    const assetNum = r['자산번호'] || r['자산 번호'] || '';
+    const equipNum = getEquipmentNumber(r);
+    const detail = data.date ? getDetailByDate(r, data.date) : null;
+    
+    let state = "보유";
+    if (detail) {
+      if (detail.includes("반납")) state = "반납";
+      else if (detail.includes("수령")) state = "수령";
+    }
+    
+    let person = "", issue = detail || "기록 없음";
+    if (detail) {
+      const match = detail.match(/\(([^-]+)-([^)]+)\)/) || detail.match(/([가-힣]+)\s*-\s*(.+)/);
+      if (match) {
+        person = match[1].trim();
+        issue = match[2].trim();
+      }
+    }
+    
+    const equipDisplay = equipNum ? r._equip + '(' + equipNum + ')' : r._equip;
+    const hasIssue = detail && isRealIssue(detail);
+    const cardClass = hasIssue ? 'card issue' : 'card normal';
+    const noteClass = hasIssue ? 'card-note' : 'card-note normal';
+    
+    return '<div class="' + cardClass + '"><div class="card-title">' + locName + ' ' + state + ' / ' + equipDisplay + ' / ' + assetNum + '</div><div class="' + noteClass + '">' + (data.date || '최근') + ' ' + (person ? person + ' - ' : '') + issue + '</div></div>';
+  }).join('');
+}
+
+function displayLocationResults() {
+  const loc = document.getElementById('locationSelect').value;
+  if (!loc) {
+    document.getElementById('results').innerHTML = '';
+    return;
+  }
+  
+  let found = allData.filter(r => parseCurrentLocation(r).location === loc);
+  if (found.length === 0) {
+    document.getElementById('results').innerHTML = '<p style="padding:20px; text-align:center; color:#999;">해당 장소에 장비가 없습니다</p>';
+    return;
+  }
+  
+  // 버튼 그룹 추가
+  let html = '<div class="button-group">';
+  html += '<div>';
+  html += '<button class="select-all-btn" onclick="selectAllEquipment(true)">✓ 전체선택</button>';
+  html += '<button class="select-all-btn" onclick="selectAllEquipment(false)">✗ 전체해제</button>';
+  html += '</div>';
+  html += '<button class="send-email-btn" onclick="showEmailModalWithSelection(\'' + loc + '\')">📧 선택항목 메일 전송</button>';
+  html += '</div>';
+  
+  html += found.map((r, idx) => {
+    const data = parseCurrentLocation(r);
+    const locName = /^[1-6]$/.test(data.location) ? data.location + '팀' : data.location;
+    const assetNum = r['자산번호'] || r['자산 번호'] || '';
+    const equipNum = getEquipmentNumber(r);
+    const detail = data.date ? getDetailByDate(r, data.date) : null;
+    
+    let state = "보유";
+    if (detail) {
+      if (detail.includes("반납")) state = "반납";
+      else if (detail.includes("수령")) state = "수령";
+    }
+    
+    let person = "", issue = detail || "기록 없음";
+    if (detail) {
+      const match = detail.match(/\(([^-]+)-([^)]+)\)/) || detail.match(/([가-힣]+)\s*-\s*(.+)/);
+      if (match) {
+        person = match[1].trim();
+        issue = match[2].trim();
+      }
+    }
+    
+    const equipDisplay = equipNum ? r._equip + '(' + equipNum + ')' : r._equip;
+    const hasIssue = detail && isRealIssue(detail);
+    const cardClass = hasIssue ? 'card issue' : 'card normal';
+    const noteClass = hasIssue ? 'card-note' : 'card-note normal';
+    
+    // 엑셀 전송용 데이터
+    const equipData = JSON.stringify({
+      '': '',
+      '기기명': r['기기명'] || '',
+      '모델': r['모델'] || '',
+      '제조번호': r['제조번호'] || r['제조 번호'] || '',
+      '자산번호': assetNum,
+      '현재위치': r['현재위치'] || r['현재 위치'] || ''
+    }).replace(/'/g, '&apos;');
+    
+    return '<div class="' + cardClass + '" style="display: flex; align-items: center;"><input type="checkbox" class="equipment-checkbox" data-equipment=\'' + equipData + '\' checked><div style="flex: 1;"><div class="card-title">' + locName + ' ' + state + ' / ' + equipDisplay + ' / ' + assetNum + '</div><div class="' + noteClass + '">' + (data.date || '최근') + ' ' + (person ? person + ' - ' : '') + issue + '</div></div></div>';
+  }).join('');
+  
+  document.getElementById('results').innerHTML = html;
+}
+
+// 전체 선택/해제
+function selectAllEquipment(checked) {
+  document.querySelectorAll('.equipment-checkbox').forEach(cb => cb.checked = checked);
+}
+
+let currentLocation = null;
+let selectedSender = null;
+
+function showEmailModalWithSelection(location) {
+  // 선택된 장비 확인
+  const selectedCheckboxes = document.querySelectorAll('.equipment-checkbox:checked');
+  
+  if (selectedCheckboxes.length === 0) {
+    alert('⚠️ 전송할 장비를 선택해주세요!');
+    return;
+  }
+  
+  currentLocation = location;
+  const modal = document.getElementById('emailModal');
+  const recipientList = document.getElementById('recipientList');
+  
+  // 1단계: 발신자 선택
+  recipientList.innerHTML = '<div style="margin-bottom: 20px; font-size: 18px; font-weight: bold; color: #2d3436;">1️⃣ 보내는 사람 선택</div><div style="margin-bottom: 15px; padding: 10px; background: #f0f3ff; border-radius: 8px; color: #0984e3; font-weight: bold;">✓ ' + selectedCheckboxes.length + '개 장비 선택됨</div>' + Object.keys(EMAIL_SENDERS).map(name => 
+    '<button class="recipient-btn" onclick="selectSender(\'' + name + '\')">' + name + '<br><small style="color:#636e72;">' + EMAIL_SENDERS[name] + '</small></button>'
+  ).join('');
+  
+  modal.style.display = 'block';
+}
+
+function selectSender(senderName) {
+  selectedSender = senderName;
+  const recipientList = document.getElementById('recipientList');
+  
+  // 2단계: 수신자 선택
+  recipientList.innerHTML = '<div style="margin-bottom: 15px; padding: 10px; background: #e8f5e9; border-radius: 8px; color: #27ae60; font-weight: bold;">📤 보내는 사람: ' + senderName + '</div><div style="margin-bottom: 20px; font-size: 18px; font-weight: bold; color: #2d3436;">2️⃣ 받는 사람 선택</div>' + Object.keys(EMAIL_RECIPIENTS).map(name => 
+    '<button class="recipient-btn" onclick="sendEmailWithSelection(\'' + name + '\')">' + name + '<br><small style="color:#636e72;">' + EMAIL_RECIPIENTS[name] + '</small></button>'
+  ).join('');
+}
+
+function showEmailModal(location) {
+  currentLocation = location;
+  const modal = document.getElementById('emailModal');
+  const recipientList = document.getElementById('recipientList');
+  
+  // 수신자 버튼 생성
+  recipientList.innerHTML = Object.keys(EMAIL_RECIPIENTS).map(name => 
+    '<button class="recipient-btn" onclick="sendEmail(\'' + name + '\')">' + name + '<br><small style="color:#636e72;">' + EMAIL_RECIPIENTS[name] + '</small></button>'
+  ).join('');
+  
+  modal.style.display = 'block';
+}
+
+function closeEmailModal() {
+  document.getElementById('emailModal').style.display = 'none';
+}
+
+async function sendEmailWithSelection(recipientName) {
+  const recipient = EMAIL_RECIPIENTS[recipientName];
+  const sender = EMAIL_SENDERS[selectedSender];
+  const senderName = selectedSender;
+  const location = currentLocation;
+  const locName = /^[1-6]$/.test(location) ? location + '팀' : location;
+  
+  if (APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL') {
+    alert('⚠️ Google Apps Script URL을 먼저 설정해주세요!');
+    return;
+  }
+  
+  if (!selectedSender) {
+    alert('⚠️ 발신자를 선택해주세요!');
+    return;
+  }
+  
+  // 선택된 장비만 가져오기
+  const selectedCheckboxes = document.querySelectorAll('.equipment-checkbox:checked');
+  const selectedEquipment = Array.from(selectedCheckboxes).map(cb => 
+    JSON.parse(cb.getAttribute('data-equipment').replace(/&apos;/g, "'"))
+  );
+  
+  if (selectedEquipment.length === 0) {
+    alert('⚠️ 전송할 장비를 선택해주세요!');
+    return;
+  }
+  
+  // 로딩 표시
+  const modal = document.getElementById('emailModal');
+  modal.querySelector('.modal-content').innerHTML = '<div style="text-align:center; padding:40px;"><div style="font-size:40px;">📧</div><div style="margin-top:20px; font-size:18px; font-weight:bold;">메일 전송 중...</div><div style="margin-top:10px; color:#636e72;">' + selectedEquipment.length + '개 장비</div></div>';
+  
+  try {
+    // 엑셀 생성
+    const ws = XLSX.utils.json_to_sheet(selectedEquipment);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, locName);
+    
+    // Base64로 변환
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+    const fileName = locName + '_장비목록_' + selectedEquipment.length + '개_' + new Date().toISOString().slice(0, 10) + '.xlsx';
+    
+    // Apps Script로 전송 (발신자 정보 포함)
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient: recipient,
+        sender: sender,
+        senderName: senderName,
+        locationName: locName,
+        excelBase64: wbout,
+        fileName: fileName
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      modal.querySelector('.modal-content').innerHTML = '<div style="text-align:center; padding:40px;"><div style="font-size:60px;">✅</div><div style="margin-top:20px; font-size:18px; font-weight:bold; color:#00b894;">메일 전송 완료!</div><div style="margin-top:10px; color:#636e72;">' + senderName + ' → ' + recipientName + '<br>' + selectedEquipment.length + '개 장비 전송</div><button class="download-btn" onclick="closeEmailModal()" style="margin-top:20px;">닫기</button></div>';
+    } else {
+      throw new Error(result.message);
+    }
+    
+  } catch (error) {
+    modal.querySelector('.modal-content').innerHTML = '<div style="text-align:center; padding:40px;"><div style="font-size:60px;">❌</div><div style="margin-top:20px; font-size:18px; font-weight:bold; color:#d63031;">전송 실패</div><div style="margin-top:10px; color:#636e72;">' + error.message + '</div><button class="download-btn" onclick="closeEmailModal()" style="margin-top:20px;">닫기</button></div>';
+  }
+}
+
+async function sendEmail(recipientName) {
+  const recipient = EMAIL_RECIPIENTS[recipientName];
+  const location = currentLocation;
+  const locName = /^[1-6]$/.test(location) ? location + '팀' : location;
+  
+  if (APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL') {
+    alert('⚠️ Google Apps Script URL을 먼저 설정해주세요!');
+    return;
+  }
+  
+  // 로딩 표시
+  const modal = document.getElementById('emailModal');
+  modal.querySelector('.modal-content').innerHTML = '<div style="text-align:center; padding:40px;"><div style="font-size:40px;">📧</div><div style="margin-top:20px; font-size:18px; font-weight:bold;">메일 전송 중...</div></div>';
+  
+  try {
+    // 엑셀 데이터 생성
+    const found = allData.filter(r => parseCurrentLocation(r).location === location);
+    const excelData = found.map(r => ({
+      '': '',
+      '기기명': r['기기명'] || '',
+      '모델': r['모델'] || '',
+      '제조번호': r['제조번호'] || r['제조 번호'] || '',
+      '자산번호': r['자산번호'] || r['자산 번호'] || '',
+      '현재위치': r['현재위치'] || r['현재 위치'] || ''
+    }));
+    
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, locName);
+    
+    // 엑셀을 Base64로 변환
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+    const fileName = locName + '_장비목록_' + new Date().toISOString().slice(0, 10) + '.xlsx';
+    
+    // Apps Script로 전송
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient: recipient,
+        locationName: locName,
+        excelBase64: wbout,
+        fileName: fileName
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      modal.querySelector('.modal-content').innerHTML = '<div style="text-align:center; padding:40px;"><div style="font-size:60px;">✅</div><div style="margin-top:20px; font-size:18px; font-weight:bold; color:#00b894;">메일 전송 완료!</div><div style="margin-top:10px; color:#636e72;">' + recipientName + '님께 전송되었습니다.</div><button class="download-btn" onclick="closeEmailModal()" style="margin-top:20px;">닫기</button></div>';
+    } else {
+      throw new Error(result.message);
+    }
+    
+  } catch (error) {
+    modal.querySelector('.modal-content').innerHTML = '<div style="text-align:center; padding:40px;"><div style="font-size:60px;">❌</div><div style="margin-top:20px; font-size:18px; font-weight:bold; color:#d63031;">전송 실패</div><div style="margin-top:10px; color:#636e72;">' + error.message + '</div><button class="download-btn" onclick="closeEmailModal()" style="margin-top:20px;">닫기</button></div>';
+  }
+}
+
+function showCalendar() {
+  const b = document.getElementById('searchBox');
+  const issueDates = new Set();
+  
+  allData.forEach(r => {
+    const data = parseCurrentLocation(r);
+    if (data.date) {
+      const detail = getDetailByDate(r, data.date);
+      if (detail && isRealIssue(detail)) {
+        issueDates.add(data.date);
+      }
+    }
+  });
+  
+  const firstDay = new Date(currentYear, currentMonth - 1, 1).getDay();
+  const lastDate = new Date(currentYear, currentMonth, 0).getDate();
+  
+  let html = '<div class="month-nav"><button onclick="moveMonth(-1)">◀</button><b>' + currentYear + '년 ' + currentMonth + '월</b><button onclick="moveMonth(1)">▶</button></div><div class="calendar">';
+  
+  ['일', '월', '화', '수', '목', '금', '토'].forEach(d => { html += '<div class="cal-header">' + d + '</div>'; });
+  
+  for (let i = 0; i < firstDay; i++) html += '<div></div>';
+  
+  for (let d = 1; d <= lastDate; d++) {
+    const dateStr = String(currentMonth).padStart(2, '0') + '/' + String(d).padStart(2, '0');
+    html += '<div class="cal-day' + (issueDates.has(dateStr) ? ' issue' : '') + '" onclick="selectDate(\'' + dateStr + '\', this)">' + d + '</div>';
+  }
+  
+  html += '</div><div id="dateRes"></div>';
+  b.innerHTML = html;
+}
+
+function moveMonth(direction) {
+  currentMonth += direction;
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  else if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+  showCalendar();
+}
+
+function selectDate(dateStr, element) {
+  document.querySelectorAll('.cal-day').forEach(x => x.classList.remove('selected'));
+  element.classList.add('selected');
+  
+  const found = allData.filter(r => {
+    const data = parseCurrentLocation(r);
+    if (data.date !== dateStr) return false;
+    const detail = getDetailByDate(r, data.date);
+    return detail && isRealIssue(detail);
+  });
+  
+  if (found.length === 0) {
+    document.getElementById('dateRes').innerHTML = '<p style="padding:20px; text-align:center;">특이사항 없음</p>';
+    return;
+  }
+  
+  document.getElementById('dateRes').innerHTML = found.map(r => {
+    const data = parseCurrentLocation(r);
+    const locName = /^[1-6]$/.test(data.location) ? data.location + '팀' : data.location;
+    const assetNum = r['자산번호'] || r['자산 번호'] || '';
+    const equipNum = getEquipmentNumber(r);
+    const equipDisplay = equipNum ? r._equip + '(' + equipNum + ')' : r._equip;
+    const detail = getDetailByDate(r, data.date);
+    
+    return '<div class="card issue"><div class="card-title">' + locName + ' / ' + equipDisplay + ' / ' + assetNum + '</div><div class="card-note">' + detail + '</div></div>';
+  }).join('');
+}
+
+load();
+</script>
+</body>
+</html>
